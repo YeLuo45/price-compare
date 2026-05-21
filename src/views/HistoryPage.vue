@@ -15,29 +15,12 @@
     </div>
 
     <!-- 图表区域 -->
-    <div class="chart-container" v-if="historyData.length > 0">
+    <div class="chart-container" v-if="chartData.length > 0">
       <div class="chart-title">历史价格走势</div>
-      
-      <!-- 简化图表 -->
-      <div class="chart">
-        <div class="chart-text">
-          <span>最近30天价格: ¥{{ minPrice }} ~ ¥{{ maxPrice }}</span>
-        </div>
-        <div class="price-line">
-          <div 
-            v-for="(item, index) in displayData" 
-            :key="index"
-            :class="['price-dot', { lowest: item.price == minPrice, highest: item.price == maxPrice }]"
-            :style="{ left: (index / displayData.length * 100) + '%' }"
-            :title="`${item.date}: ¥${item.price}`"
-          ></div>
-        </div>
-        <div class="chart-labels">
-          <span>{{ historyData[0]?.date }}</span>
-          <span>{{ historyData[historyData.length - 1]?.date }}</span>
-        </div>
-      </div>
-      
+
+      <!-- ECharts 折线图 -->
+      <v-chart class="echarts-chart" :option="chartOption" autoresize />
+
       <!-- 统计数据 -->
       <div class="stats">
         <div class="stat-item">
@@ -53,13 +36,13 @@
           <span class="stat-value">¥{{ avgPrice }}</span>
         </div>
       </div>
-      
+
       <!-- 历史记录列表 -->
       <div class="history-list">
         <div class="history-title">价格记录</div>
-        <div 
+        <div
           class="history-item"
-          v-for="(item, index) in historyData.slice().reverse().slice(0, 10)" 
+          v-for="(item, index) in historyData.slice().reverse().slice(0, 10)"
           :key="index"
         >
           <span class="history-date">{{ item.date }}</span>
@@ -74,7 +57,7 @@
     <div class="loading" v-if="isLoading">
       <span>加载中...</span>
     </div>
-    
+
     <!-- 无数据 -->
     <div class="empty" v-if="!isLoading && historyData.length === 0 && !product">
       <span>请从搜索或监控页面查看商品历史价格</span>
@@ -85,7 +68,16 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+import dayjs from 'dayjs'
 import { useProductStore } from '../stores/product'
+
+// 注册ECharts组件
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent])
 
 const route = useRoute()
 const store = useProductStore()
@@ -93,11 +85,11 @@ const product = ref(null)
 const historyData = ref([])
 const isLoading = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
   if (route.query.product) {
     try {
       product.value = JSON.parse(route.query.product)
-      loadHistory()
+      await loadHistory()
     } catch (e) {
       console.error('解析商品信息失败', e)
     }
@@ -108,18 +100,18 @@ const loadHistory = async () => {
   if (!product.value) return
   isLoading.value = true
   try {
-    historyData.value = await store.getPriceHistory(product.value.id)
+    const history = await store.getPriceHistory(product.value.id)
+    // 转换数据格式，添加日期
+    historyData.value = history.map(h => ({
+      ...h,
+      date: dayjs(h.timestamp).format('YYYY-MM-DD HH:mm')
+    }))
   } finally {
     isLoading.value = false
   }
 }
 
-const displayData = computed(() => {
-  if (historyData.value.length <= 10) return historyData.value
-  const step = Math.floor(historyData.value.length / 10)
-  return historyData.value.filter((_, i) => i % step === 0).slice(0, 10)
-})
-
+// 计算属性
 const prices = computed(() => historyData.value.map(h => parseFloat(h.price)))
 
 const minPrice = computed(() => {
@@ -136,6 +128,81 @@ const avgPrice = computed(() => {
   if (prices.value.length === 0) return '0'
   return (prices.value.reduce((a, b) => a + b, 0) / prices.value.length).toFixed(2)
 })
+
+// ECharts 配置
+const chartData = computed(() => historyData.value)
+
+const chartOption = computed(() => ({
+  tooltip: {
+    trigger: 'axis',
+    formatter: function(params) {
+      const param = params[0]
+      return `${param.axisValue}<br/>价格: <strong>¥${param.value}</strong>`
+    }
+  },
+  grid: {
+    left: '10%',
+    right: '10%',
+    top: '10%',
+    bottom: '15%'
+  },
+  xAxis: {
+    type: 'category',
+    data: chartData.value.map(h => dayjs(h.timestamp).format('MM-DD HH:mm')),
+    boundaryGap: false
+  },
+  yAxis: {
+    type: 'value',
+    name: '价格(元)',
+    min: Math.min(...prices.value) * 0.95,
+    max: Math.max(...prices.value) * 1.05
+  },
+  dataZoom: [
+    {
+      type: 'inside',
+      start: 0,
+      end: 100
+    },
+    {
+      type: 'slider',
+      start: 0,
+      end: 100
+    }
+  ],
+  series: [
+    {
+      name: '价格',
+      type: 'line',
+      data: prices.value,
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 6,
+      lineStyle: {
+        color: '#1890ff',
+        width: 2
+      },
+      itemStyle: {
+        color: '#1890ff'
+      },
+      areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(24, 144, 255, 0.3)' },
+            { offset: 1, color: 'rgba(24, 144, 255, 0.05)' }
+          ]
+        }
+      },
+      markPoint: {
+        data: [
+          { type: 'min', name: '最低价' },
+          { type: 'max', name: '最高价' }
+        ]
+      }
+    }
+  ]
+}))
 </script>
 
 <style scoped>
@@ -190,43 +257,10 @@ const avgPrice = computed(() => {
   margin-bottom: 15px;
 }
 
-.chart {
+.echarts-chart {
+  width: 100%;
+  height: 300px;
   margin-bottom: 15px;
-}
-
-.chart-text {
-  text-align: center;
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 10px;
-}
-
-.price-line {
-  position: relative;
-  height: 30px;
-  border-bottom: 1px solid #eee;
-  margin: 0 10px;
-}
-
-.price-dot {
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  background: #1890ff;
-  border-radius: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.price-dot.lowest { background: #52c41a; }
-.price-dot.highest { background: #ff4d4f; }
-
-.chart-labels {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 5px;
-  font-size: 11px;
-  color: #999;
 }
 
 .stats {
@@ -293,4 +327,16 @@ const avgPrice = computed(() => {
   padding: 50px;
   color: #999;
 }
+
+.platform-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #fff;
+}
+
+.platform-taobao { background: #FF5000; }
+.platform-tmall { background: #FF6A00; }
+.platform-jd { background: #E1251B; }
+.platform-pdd { background: #E13026; }
 </style>

@@ -12,25 +12,25 @@
     </div>
 
     <!-- 排序选项 -->
-    <div class="sort-bar" v-if="store.searchResults.length > 0">
+    <div class="sort-bar" v-if="store.products.length > 0">
       <span class="sort-label">排序：</span>
       <div class="sort-options">
         <span 
           v-for="option in sortOptions" 
           :key="option.value"
-          :class="['sort-item', { active: store.sortBy === option.value }]"
+          :class="['sort-item', { active: sortBy === option.value }]"
           @click="handleSort(option.value)"
         >{{ option.label }}</span>
       </div>
     </div>
 
     <!-- 加载状态 -->
-    <div class="loading" v-if="store.isSearching">
+    <div class="loading" v-if="store.loading">
       <span>搜索中...</span>
     </div>
 
     <!-- 无结果 -->
-    <div class="empty" v-else-if="store.searchResults.length === 0 && hasSearched">
+    <div class="empty" v-else-if="store.products.length === 0 && hasSearched">
       <span>未找到相关商品</span>
     </div>
 
@@ -38,7 +38,7 @@
     <div class="result-list" v-else>
       <div 
         class="result-item" 
-        v-for="item in store.sortedResults" 
+        v-for="item in sortedProducts" 
         :key="item.id"
       >
         <div class="item-header">
@@ -70,10 +70,10 @@
         
         <div class="item-actions">
           <button 
-            :class="['action-btn', { 'active': store.isMonitored(item.id) }]"
+            :class="['action-btn', { 'active': isMonitored(item.id) }]"
             @click="toggleMonitor(item)"
           >
-            {{ store.isMonitored(item.id) ? '已监控' : '加入监控' }}
+            {{ isMonitored(item.id) ? '已监控' : '加入监控' }}
           </button>
           <button class="action-btn secondary" @click="viewHistory(item)">历史价格</button>
         </div>
@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useProductStore } from '../stores/product'
 import { useRouter } from 'vue-router'
 
@@ -91,6 +91,7 @@ const store = useProductStore()
 const router = useRouter()
 const keyword = ref('')
 const hasSearched = ref(false)
+const sortBy = ref('price_asc')
 
 const sortOptions = [
   { label: '价格↑', value: 'price_asc' },
@@ -102,11 +103,50 @@ const sortOptions = [
 const handleSearch = () => {
   if (!keyword.value.trim()) return
   hasSearched.value = true
-  store.search(keyword.value)
+  // 模拟真实API延迟返回（实际延迟在store.searchProducts中实现）
+  store.searchProducts(keyword.value)
 }
 
 const handleSort = (sort) => {
-  store.setSortBy(sort)
+  sortBy.value = sort
+}
+
+const sortedProducts = computed(() => {
+  const products = [...store.products]
+  switch (sortBy.value) {
+    case 'price_asc':
+      return products.sort((a, b) => a.price - b.price)
+    case 'price_desc':
+      return products.sort((a, b) => b.price - a.price)
+    case 'sales_desc':
+      return products.sort((a, b) => b.sales - a.sales)
+    case 'rating_desc':
+      return products.sort((a, b) => b.rating - a.rating)
+    default:
+      return products
+  }
+})
+
+const isMonitored = (productId) => {
+  return store.monitorTasks.some(t => t.productId === productId)
+}
+
+const toggleMonitor = async (item) => {
+  if (isMonitored(item.id)) {
+    const task = store.monitorTasks.find(t => t.productId === item.id)
+    if (task) {
+      await store.deleteMonitorTask(task.id)
+      alert('已取消监控')
+    }
+  } else {
+    await store.addMonitorTask({
+      productId: item.id,
+      title: item.title,
+      price: item.price,
+      platform: item.platform
+    })
+    alert('已加入监控')
+  }
 }
 
 const formatSales = (num) => {
@@ -114,16 +154,6 @@ const formatSales = (num) => {
     return (num / 10000).toFixed(1) + '万'
   }
   return num.toString()
-}
-
-const toggleMonitor = (item) => {
-  if (store.isMonitored(item.id)) {
-    store.removeFromMonitor(item.id)
-    alert('已取消监控')
-  } else {
-    store.addToMonitor(item)
-    alert('已加入监控')
-  }
 }
 
 const viewHistory = (item) => {
