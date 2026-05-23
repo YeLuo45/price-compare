@@ -11,6 +11,9 @@
       <button class="search-btn" @click="handleSearch">搜索</button>
     </div>
 
+    <!-- 价格源选择器 -->
+    <SourceSelector v-if="store.products.length > 0" @change="handleSourceChange" />
+
     <!-- 排序选项 -->
     <div class="sort-bar" v-if="store.products.length > 0">
       <span class="sort-label">排序：</span>
@@ -86,12 +89,14 @@
 import { ref, computed } from 'vue'
 import { useProductStore } from '../stores/product'
 import { useRouter } from 'vue-router'
+import SourceSelector from '@/components/SourceSelector.vue'
 
 const store = useProductStore()
 const router = useRouter()
 const keyword = ref('')
 const hasSearched = ref(false)
 const sortBy = ref('price_asc')
+const activeSources = ref(['jd', 'tmall', 'pdd'])
 
 const sortOptions = [
   { label: '价格↑', value: 'price_asc' },
@@ -103,8 +108,12 @@ const sortOptions = [
 const handleSearch = () => {
   if (!keyword.value.trim()) return
   hasSearched.value = true
-  // 模拟真实API延迟返回（实际延迟在store.searchProducts中实现）
-  store.searchProducts(keyword.value)
+  // 使用activeSources进行搜索
+  store.searchProducts(keyword.value, activeSources.value)
+}
+
+const handleSourceChange = (sourceIds) => {
+  activeSources.value = sourceIds
 }
 
 const handleSort = (sort) => {
